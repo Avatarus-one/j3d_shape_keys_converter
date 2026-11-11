@@ -82,6 +82,11 @@ Blender-style numbering is used, for example
 
 ## Import options
 
+- **Delta Scale** (default `0.01`) — multiplies BLS position deltas before they
+  are added to the target mesh vertices. The default `0.01` matches a mesh
+  imported with `j3d_bmd_io`'s default Scale `0.01`; use `1.0` for Blemd, which
+  imports in model units. The same scale is used when comparing imported keys
+  with existing shape keys, so duplicate/conflict detection stays correct.
 - **Include keys without changes** — automatically selects keys that do not
   change the geometry. By default such keys are not imported.
 - Imported keys whose names match existing shape keys on the target mesh are

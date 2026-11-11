@@ -471,27 +471,48 @@ class KeyRecord:
         digest.update(repr(self.displacements).encode('ascii'))
         self.signature = digest.hexdigest()
 
-    def matches(self, other, tolerance=DISPLACEMENT_TOLERANCE):
+    def matches(self, other, tolerance=DISPLACEMENT_TOLERANCE, delta_scale=0.01):
         """Return True when both keys produce the same deformation.
 
         Only position deltas matter: normals are not imported into shape
         keys, and zero deltas never move a vertex.  Vertex order and the
         number of slots are irrelevant, so the same movement stored with
         different vertex counts is still recognised as a duplicate.
+
+        *delta_scale* is applied before comparison so the tolerance is
+        measured in the target mesh's units.
         """
         if self.signature == other.signature:
             return True
 
+        if delta_scale == 1.0:
+            mine = self.displacement_map
+            theirs = other.displacement_map
+        else:
+            mine = {
+                vertex: (dx * delta_scale, dy * delta_scale, dz * delta_scale)
+                for vertex, (dx, dy, dz) in self.displacement_map.items()
+            }
+            theirs = {
+                vertex: (dx * delta_scale, dy * delta_scale, dz * delta_scale)
+                for vertex, (dx, dy, dz) in other.displacement_map.items()
+            }
+
         return displacement_maps_match(
-            self.displacement_map,
-            other.displacement_map,
+            mine,
+            theirs,
             tolerance,
         )
 
-    def blender_displacement_map(self):
-        """Return the per-vertex displacement in Blender's Z-up space."""
+    def blender_displacement_map(self, delta_scale=0.01):
+        """Return the per-vertex displacement in Blender's Z-up space.
+
+        *delta_scale* converts BLS/model units to the target mesh's units.
+        Use ``0.01`` for meshes imported with ``j3d_bmd_io``'s default scale,
+        and ``1.0`` for Blemd, which imports in model units.
+        """
         return {
-            vertex: (dx, -dz, dy)
+            vertex: (dx * delta_scale, -dz * delta_scale, dy * delta_scale)
             for vertex, (dx, dy, dz) in self.displacement_map.items()
         }
 

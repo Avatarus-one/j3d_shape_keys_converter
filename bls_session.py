@@ -68,9 +68,10 @@ class ExistingKey:
     name: str
     displacement_map: Dict[int, tuple]
 
-    def matches(self, record, tolerance=bls_parser.DISPLACEMENT_TOLERANCE):
+    def matches(self, record, tolerance=bls_parser.DISPLACEMENT_TOLERANCE,
+                delta_scale=0.01):
         return bls_parser.displacement_maps_match(
-            record.blender_displacement_map(),
+            record.blender_displacement_map(delta_scale),
             self.displacement_map,
             tolerance,
         )
@@ -214,7 +215,7 @@ def _rename_base(entry):
 
 
 def build_session(paths, recursive=True, progress=None, existing_keys=None,
-                  vertex_count=None):
+                  vertex_count=None, delta_scale=0.01):
     """Read all BLS paths and compute duplicate/conflict information.
 
     Parameters
@@ -232,6 +233,10 @@ def build_session(paths, recursive=True, progress=None, existing_keys=None,
     vertex_count:
         Number of vertices of the target mesh.  Keys that reference a vertex
         outside this range are marked as incompatible and cannot be imported.
+    delta_scale:
+        Scale applied to BLS position deltas before they are compared with
+        existing shape keys.  Use ``0.01`` for meshes imported with
+        ``j3d_bmd_io``'s default scale and ``1.0`` for Blemd.
     """
     session = ImportSession()
 
@@ -281,7 +286,7 @@ def build_session(paths, recursive=True, progress=None, existing_keys=None,
 
         session.files.append(file_entry)
 
-    _analyse(session, existing_keys, vertex_count)
+    _analyse(session, existing_keys, vertex_count, delta_scale)
 
     for file_entry in session.files:
         _summarise_file(file_entry)
@@ -312,7 +317,7 @@ def _out_of_bounds_vertex(record, vertex_count):
     return offending
 
 
-def _analyse(session, existing_keys=None, vertex_count=None):
+def _analyse(session, existing_keys=None, vertex_count=None, delta_scale=0.01):
     """Mark duplicates, conflicts, incompatible and base/no-op keys."""
     used_names = set()
 
@@ -386,7 +391,9 @@ def _analyse(session, existing_keys=None, vertex_count=None):
 
             if entry.record.is_zero:
                 if external_key is not None:
-                    if external_key.matches(entry.record):
+                    if external_key.matches(
+                        entry.record, delta_scale=delta_scale
+                    ):
                         entry.status = DUPLICATE
                         entry.include = False
                         entry.new_name = external_key.name
@@ -433,7 +440,7 @@ def _analyse(session, existing_keys=None, vertex_count=None):
 
             match = None
             for other in existing:
-                if other.record.matches(entry.record):
+                if other.record.matches(entry.record, delta_scale=delta_scale):
                     match = other
                     break
 
@@ -463,7 +470,9 @@ def _analyse(session, existing_keys=None, vertex_count=None):
                 )
                 file_entry.conflict_count += 1
             elif external_key is not None:
-                if external_key.matches(entry.record):
+                if external_key.matches(
+                    entry.record, delta_scale=delta_scale
+                ):
                     entry.status = DUPLICATE
                     entry.include = False
                     entry.new_name = external_key.name
@@ -513,9 +522,9 @@ def _analyse(session, existing_keys=None, vertex_count=None):
             )
 
 
-def reanalyse(session, existing_keys=None, vertex_count=None):
+def reanalyse(session, existing_keys=None, vertex_count=None, delta_scale=0.01):
     """Re-run duplicate/conflict detection and refresh file summaries."""
-    _analyse(session, existing_keys, vertex_count)
+    _analyse(session, existing_keys, vertex_count, delta_scale)
 
     for file_entry in session.files:
         _summarise_file(file_entry)

@@ -168,6 +168,28 @@ def _existing_keys(target):
     ]
 
 
+def _reanalyse_session(context):
+    """Re-run duplicate/conflict analysis with the current import settings."""
+    global _SESSION
+
+    if _SESSION is None:
+        return
+
+    settings = _get_settings(context)
+
+    if settings is None:
+        return
+
+    bls_session.reanalyse(
+        _SESSION,
+        _existing_keys(settings.target),
+        _target_vertex_count(settings.target),
+        delta_scale=settings.delta_scale,
+    )
+    _apply_session_to_settings(settings, _SESSION)
+    _redraw(context)
+
+
 def _apply_session_to_settings(settings, session):
     """Refresh UI items after the session was re-analysed."""
     global _SYNCING
@@ -272,23 +294,18 @@ def _prepare_draw_collisions(settings):
 
 def _target_changed(self, context):
     """The target mesh changed: re-run duplicate/conflict detection."""
-    global _SESSION
-
-    if _SYNCING or _SESSION is None:
+    if _SYNCING:
         return
 
-    settings = _get_settings(context)
+    _reanalyse_session(context)
 
-    if settings is None:
+
+def _delta_scale_changed(self, context):
+    """The delta scale changed: re-run duplicate/conflict detection."""
+    if _SYNCING:
         return
 
-    bls_session.reanalyse(
-        _SESSION,
-        _existing_keys(self.target),
-        _target_vertex_count(self.target),
-    )
-    _apply_session_to_settings(settings, _SESSION)
-    _redraw(context)
+    _reanalyse_session(context)
 
 
 def _file_include_changed(self, context):
@@ -488,6 +505,18 @@ class BLS_Settings(PropertyGroup):
                     'geometry',
         default=False,
         update=_include_no_change_changed,
+    )
+
+    delta_scale: FloatProperty(
+        name='Delta Scale',
+        description='Scale applied to BLS position deltas. 0.01 by default for j3d_bmd_io;'
+                    '1.0 for Blemd',
+        default=0.01,
+        min=1e-6,
+        soft_min=0.01,
+        soft_max=1.0,
+        precision=6,
+        update=_delta_scale_changed,
     )
 
 
@@ -762,6 +791,7 @@ def _begin_import(context, paths, operator):
             recursive=True,
             existing_keys=_existing_keys(settings.target),
             vertex_count=_target_vertex_count(settings.target),
+            delta_scale=settings.delta_scale,
         )
     except Exception as exc:
         operator.report({'ERROR'}, f'Could not read BLS: {exc}')
@@ -857,6 +887,7 @@ def _draw_target_and_options(layout, settings):
     target_row.prop(settings, 'target')
 
     box.prop(settings, 'include_no_change')
+    box.prop(settings, 'delta_scale')
 
     note = box.column(align=True)
     note.active = False
@@ -1432,6 +1463,7 @@ class BLS_OT_settings(Operator):
             _SESSION,
             _existing_keys(settings.target),
             _target_vertex_count(settings.target),
+            delta_scale=settings.delta_scale,
         )
         _apply_session_to_settings(settings, _SESSION)
 
@@ -1524,6 +1556,7 @@ class BLS_OT_settings(Operator):
                 context,
                 settings.target,
                 jobs,
+                delta_scale=settings.delta_scale,
             )
         except Exception as exc:
             self.report({'ERROR'}, f'Import failed: {exc}')

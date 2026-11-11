@@ -58,11 +58,13 @@ def _convert_delta(delta):
     return dx, -dz, dy
 
 
-def _build_coordinates(slots, base_coords, vertex_count):
+def _build_coordinates(slots, base_coords, vertex_count, delta_scale=0.01):
     """Build a flat coordinate array for one shape key.
 
     Shape-key blocks store absolute coordinates, so the array starts as a
     copy of the mesh's base coordinates and the BLS deltas are added to it.
+    *delta_scale* converts the BLS/model-unit delta to the target mesh's
+    units (0.01 for j3d_bmd_io's default import scale, 1.0 for Blemd).
     Returns ``(coords, touched, out_of_range)`` where *touched* is the number
     of slots that referenced an existing mesh vertex.
     """
@@ -80,9 +82,9 @@ def _build_coordinates(slots, base_coords, vertex_count):
         dx, dy, dz = _convert_delta(slot.delta)
         offset = vertex * 3
 
-        coords[offset] += dx
-        coords[offset + 1] += dy
-        coords[offset + 2] += dz
+        coords[offset] += dx * delta_scale
+        coords[offset + 1] += dy * delta_scale
+        coords[offset + 2] += dz * delta_scale
         touched += 1
 
     return coords, touched, out_of_range
@@ -132,7 +134,7 @@ def existing_shape_key_displacements(obj):
     return result
 
 
-def apply_shape_keys(context, obj, jobs):
+def apply_shape_keys(context, obj, jobs, delta_scale=0.01):
     """Add shape keys to *obj*.
 
     Parameters
@@ -144,12 +146,17 @@ def apply_shape_keys(context, obj, jobs):
     jobs:
         Iterable of ``(name, slots, source_name)`` tuples.  *slots* is a list
         of :class:`bls_parser.Slot` objects.
+    delta_scale:
+        Scale applied to BLS position deltas before they are added to the
+        mesh.  Use ``0.01`` for meshes imported with ``j3d_bmd_io``'s default
+        scale and ``1.0`` for Blemd.
 
     A key whose final name already exists is overwritten.  The dialog renames
     imported keys that would collide with existing shape keys, so an overwrite
     only happens when the user deliberately renames a key back.
 
-    BLS deltas are rotated from J3D Y-up to Blender Z-up.
+    BLS deltas are rotated from J3D Y-up to Blender Z-up and multiplied by
+    *delta_scale*.
     """
     if obj is None:
         raise ValueError('No target mesh selected')
@@ -208,7 +215,7 @@ def apply_shape_keys(context, obj, jobs):
 
     for name, slots, _source_name in jobs:
         coords, touched, out_of_range = _build_coordinates(
-            slots, base_coords, vertex_count
+            slots, base_coords, vertex_count, delta_scale
         )
         stats['out_of_range'] += out_of_range
 
