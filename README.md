@@ -83,12 +83,12 @@ map, normal slots, per-key normal arrays, and the normal blend table used by
 the runtime deformer.
 
 Normal slots are shared by equal normal directions to stay inside the 13-bit
-BLS normal-pool limit. Destinations follow a canonical `(vertex, normal)` layout
-computed from the Blender mesh. The BMD exporter computes the same layout
-independently, so a BMD and a BLS exported from the same mesh address the same
-normal array without sharing metadata or add-on state. If a multi-key cluster
-would exceed the 8192-entry normal pool, the exporter lowers normal precision
-only as far as needed; positions, destinations and blend topology are unchanged.
+BLS normal-pool limit. Destinations use the per-corner normal indices saved on
+the mesh by `j3d_bmd_io` when the BMD was imported or last exported.
+
+BMD export with **Apply Modifiers** preserves this metadata only when the
+modifier result has identical topology and vertex positions. Otherwise you should
+apply the modifiers before working with shape keys.
 
 ## Key statuses
 
@@ -159,12 +159,15 @@ Blender-style numbering is used, for example
   created for. If the BMD mesh is modified or re-exported, re-export the BLS
   from Blender as well. Original BLS normal destinations are not remapped
   automatically; positions may still deform, but normals and shape-key
-  behaviour can be wrong or reference an out-of-range normal array. Conversely,
-  a BLS exported from Blender is intended for the BMD exported from the same
-  mesh: with the original BMD its position map can still match, but its normal
-  destinations use the canonical layout and may update the wrong normal slots
-  or exceed the original normal array. Normal destinations are not
-  interchangeable between an original and a re-exported BMD.
+  behaviour can be wrong or reference an out-of-range normal array. BLS normal
+  destinations always use the normal metadata saved on the mesh, so they are
+  not interchangeable between the original BMD and a re-exported BMD. Changing
+  vertex or polygon topology invalidates the metadata; the dialog warns that a
+  BMD re-export with `j3d_bmd_io` is required.
+- **Apply Modifiers** during BMD export keeps the metadata only if the modifier
+  result has exactly the same topology and vertex positions. Topology- or
+  position-changing modifiers invalidate it; apply them before creating or
+  exporting the shape keys.
 - BLS export targets one mesh. Export the matching BMD from that mesh alone (the
   usual **Import as Single Mesh** workflow); a BMD containing several mesh
   objects gives each object its own normal-index range.

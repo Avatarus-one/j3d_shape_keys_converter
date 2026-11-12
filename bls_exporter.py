@@ -5,6 +5,7 @@ from __future__ import annotations
 import bpy
 import numpy as np
 
+from . import bmd_metadata
 from . import bls_writer
 
 
@@ -98,12 +99,7 @@ def _corner_normals(mesh):
 
 
 def _natural_normal_layout(mesh):
-    """Canonical per-corner normal indices derived from the mesh itself.
-
-    The BMD exporter implements the same algorithm independently.  Keeping the
-    two implementations in sync makes a BMD and a BLS exported from the same
-    mesh address the same normal array without any shared metadata.
-    """
+    """Fallback canonical layout when BMD metadata is unavailable."""
     count = len(mesh.loops)
 
     if count == 0:
@@ -173,9 +169,15 @@ def _fit_normal_pool(base_normals, key_normals):
     return base_normals, key_normals
 
 
-def _normal_layout(mesh):
-    """Return the canonical BMD normal index used by every mesh corner."""
-    return _natural_normal_layout(mesh)
+def _normal_layout(obj):
+    """Return stored normal indices, or a canonical fallback."""
+    indices, _normal_count, position_offset, status, _message = (
+        bmd_metadata.read_normal_metadata(obj))
+
+    if status == bmd_metadata.OK:
+        return indices, position_offset
+
+    return _natural_normal_layout(obj.data), 0
 
 
 def collect_export_data(obj, key_names, convert_units=True, base_name=None):
@@ -186,6 +188,8 @@ def collect_export_data(obj, key_names, convert_units=True, base_name=None):
     key_normals, cluster_vertices, base_name)``.
 
     *base_name* overrides the default ``<mesh>__base`` base-key name.
+    BLS destinations use the normal indices stored by the BMD importer/exporter;
+    when those are unavailable or stale, a canonical layout is used as fallback.
     """
     if obj is None or obj.type != "MESH" or obj.data is None:
         raise BLSExportError("No target mesh selected")
@@ -235,7 +239,9 @@ def collect_export_data(obj, key_names, convert_units=True, base_name=None):
     if not moved:
         moved.update(range(count))
 
-    vertex_indices = sorted(moved)
+    local_vertex_indices = sorted(moved)
+    layout, position_offset = _normal_layout(obj)
+    vertex_indices = [v + position_offset for v in local_vertex_indices]
     scale = 100.0 if convert_units else 1.0
 
     base_positions = [
@@ -244,7 +250,7 @@ def collect_export_data(obj, key_names, convert_units=True, base_name=None):
              basis_coords[v * 3 + 2]),
             scale,
         )
-        for v in vertex_indices
+        for v in local_vertex_indices
     ]
 
     keys = []
@@ -257,7 +263,7 @@ def collect_export_data(obj, key_names, convert_units=True, base_name=None):
                     (coords[v * 3], coords[v * 3 + 1], coords[v * 3 + 2]),
                     scale,
                 )
-                for v in vertex_indices
+                for v in local_vertex_indices
             ],
         ))
 
@@ -266,7 +272,6 @@ def collect_export_data(obj, key_names, convert_units=True, base_name=None):
         _vertex_normals(coords, triangles, count)
         for _name, coords in key_coords
     ]
-    layout = _normal_layout(mesh)
 
     if layout and len(layout) == len(mesh.loops):
         # Use the same normal indices the BMD exporter writes.  A vertex may

@@ -42,7 +42,7 @@ from bpy.types import (
 from bpy.app.handlers import persistent
 from bpy_extras.io_utils import ImportHelper, ExportHelper
 
-from . import bls_importer, bls_session
+from . import bmd_metadata, bls_importer, bls_session
 from . import bls_exporter
 
 
@@ -1089,6 +1089,13 @@ class BLS_OT_export_settings(Operator):
         target_row.prop(settings, 'target')
 
         box.prop(settings, 'convert_units')
+
+        if settings.target is not None:
+            _indices, _count, _offset, status, message = (
+                bmd_metadata.read_normal_metadata(settings.target))
+
+            if status != bmd_metadata.OK:
+                box.label(text=message, icon='ERROR')
 
         note = box.column(align=True)
         note.active = False
