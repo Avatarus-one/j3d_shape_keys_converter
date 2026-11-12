@@ -80,9 +80,15 @@ The exporter writes one BLS cluster containing the selected keys and a trailing
 base key. Keys are stored in the selected order. Vertex normals are generated
 for the base key and every selected key, and the cluster contains the position
 map, normal slots, per-key normal arrays, and the normal blend table used by
-the runtime deformer. One normal slot is used per vertex (no normal-slot
-grouping). The export is self-contained and does not rely on metadata added by
-other add-ons, so it also works for meshes created from scratch.
+the runtime deformer.
+
+Normal slots are shared by equal normal directions to stay inside the 13-bit
+BLS normal-pool limit. Destinations follow a canonical `(vertex, normal)` layout
+computed from the Blender mesh. The BMD exporter computes the same layout
+independently, so a BMD and a BLS exported from the same mesh address the same
+normal array without sharing metadata or add-on state. If a multi-key cluster
+would exceed the 8192-entry normal pool, the exporter lowers normal precision
+only as far as needed; positions, destinations and blend topology are unchanged.
 
 ## Key statuses
 
@@ -149,12 +155,27 @@ Blender-style numbering is used, for example
   are not imported.
 - BLS normals do not participate in shape key creation: Blender stores only
   vertex coordinates, and normals are recalculated from the geometry.
-- BLS export does not group vertices by shared normals. Every mesh vertex gets
-  its own normal slot, so exported files may contain more normal slots than the
-  original BLS.
-- Split-normal export is not supported. Each vertex writes to a single normal
-  destination; the exporter does not reproduce the multiple BMD normal indices
-  that original BLS files use for split normals.
+- An original BLS is only guaranteed to work with the original BMD it was
+  created for. If the BMD mesh is modified or re-exported, re-export the BLS
+  from Blender as well. Original BLS normal destinations are not remapped
+  automatically; positions may still deform, but normals and shape-key
+  behaviour can be wrong or reference an out-of-range normal array. Conversely,
+  a BLS exported from Blender is intended for the BMD exported from the same
+  mesh: with the original BMD its position map can still match, but its normal
+  destinations use the canonical layout and may update the wrong normal slots
+  or exceed the original normal array. Normal destinations are not
+  interchangeable between an original and a re-exported BMD.
+- BLS export targets one mesh. Export the matching BMD from that mesh alone (the
+  usual **Import as Single Mesh** workflow); a BMD containing several mesh
+  objects gives each object its own normal-index range.
+- The BMD must be exported with **Float32** positions in `j3d_bmd_io` (the
+  `s16` position option is not compatible with BLS). The game's `J3DDeformer`
+  deforms positions only when they are float32; normal deformation additionally
+  requires **Float32** normals. Imported formats are kept by default, so select
+  Float32 explicitly when the source BMD used 16-bit data.
+- The BLS normal pool is limited to 8192 distinct vectors by the 13-bit index
+  field. Very large multi-key clusters may therefore be exported with slightly
+  reduced normal precision. Positions and normal destinations are not affected.
 - Duplicates and conflicts are determined by the actual vertex displacement:
   only non-zero position deltas are summed, and each vertex is compared with a
   tolerance of 0.001. Normals, zero slots, and a different number of slots do
