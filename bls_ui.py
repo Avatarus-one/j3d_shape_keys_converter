@@ -107,6 +107,14 @@ def _get_settings(context=None):
     return getattr(scene, 'bls_settings', None)
 
 
+CONVERTED_DELTA_SCALE = 0.01
+
+
+def _delta_scale(settings):
+    """Return the BLS delta scale selected by the Convert Units checkbox."""
+    return CONVERTED_DELTA_SCALE if settings.convert_units else 1.0
+
+
 def _refresh_file_includes(settings):
     """Make every file checkbox reflect its selectable key checkboxes.
 
@@ -184,7 +192,7 @@ def _reanalyse_session(context):
         _SESSION,
         _existing_keys(settings.target),
         _target_vertex_count(settings.target),
-        delta_scale=settings.delta_scale,
+        delta_scale=_delta_scale(settings),
     )
     _apply_session_to_settings(settings, _SESSION)
     _redraw(context)
@@ -300,8 +308,8 @@ def _target_changed(self, context):
     _reanalyse_session(context)
 
 
-def _delta_scale_changed(self, context):
-    """The delta scale changed: re-run duplicate/conflict detection."""
+def _convert_units_changed(self, context):
+    """The Convert Units checkbox changed: re-run duplicate detection."""
     if _SYNCING:
         return
 
@@ -499,24 +507,20 @@ class BLS_Settings(PropertyGroup):
     active_file: IntProperty(default=-1)
     active_key: IntProperty(default=-1)
 
+    convert_units: BoolProperty(
+        name='Convert Units',
+        description='Scale shape key deltas from J3D units to Blender units (if using j3d_bmd_io). '
+                    'Disable if using Blemd',
+        default=True,
+        update=_convert_units_changed,
+    )
+
     include_no_change: BoolProperty(
         name='Include keys without changes',
         description='Automatically select keys that do not change the '
                     'geometry',
         default=False,
         update=_include_no_change_changed,
-    )
-
-    delta_scale: FloatProperty(
-        name='Delta Scale',
-        description='Scale applied to BLS position deltas. 0.01 by default for j3d_bmd_io;'
-                    '1.0 for Blemd',
-        default=0.01,
-        min=1e-6,
-        soft_min=0.01,
-        soft_max=1.0,
-        precision=6,
-        update=_delta_scale_changed,
     )
 
 
@@ -791,7 +795,7 @@ def _begin_import(context, paths, operator):
             recursive=True,
             existing_keys=_existing_keys(settings.target),
             vertex_count=_target_vertex_count(settings.target),
-            delta_scale=settings.delta_scale,
+            delta_scale=_delta_scale(settings),
         )
     except Exception as exc:
         operator.report({'ERROR'}, f'Could not read BLS: {exc}')
@@ -886,8 +890,8 @@ def _draw_target_and_options(layout, settings):
     target_row.alert = settings.target is None
     target_row.prop(settings, 'target')
 
+    box.prop(settings, 'convert_units')
     box.prop(settings, 'include_no_change')
-    box.prop(settings, 'delta_scale')
 
     note = box.column(align=True)
     note.active = False
@@ -1348,10 +1352,6 @@ def _draw_file_list_uilist(layout, settings):
 
     header = layout.row(align=True)
     header.label(text=f'Files: {count}', icon='FILE_FOLDER')
-    header.label(
-        text='Click a file name to review its keys',
-        icon='INFO',
-    )
 
     if count == 0:
         layout.label(text='No files to import', icon='ERROR')
@@ -1463,7 +1463,7 @@ class BLS_OT_settings(Operator):
             _SESSION,
             _existing_keys(settings.target),
             _target_vertex_count(settings.target),
-            delta_scale=settings.delta_scale,
+            delta_scale=_delta_scale(settings),
         )
         _apply_session_to_settings(settings, _SESSION)
 
@@ -1556,7 +1556,7 @@ class BLS_OT_settings(Operator):
                 context,
                 settings.target,
                 jobs,
-                delta_scale=settings.delta_scale,
+                delta_scale=_delta_scale(settings),
             )
         except Exception as exc:
             self.report({'ERROR'}, f'Import failed: {exc}')

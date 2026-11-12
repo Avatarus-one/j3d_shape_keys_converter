@@ -82,11 +82,11 @@ Blender-style numbering is used, for example
 
 ## Import options
 
-- **Delta Scale** (default `0.01`) — multiplies BLS position deltas before they
-  are added to the target mesh vertices. The default `0.01` matches a mesh
-  imported with `j3d_bmd_io`'s default Scale `0.01`; use `1.0` for Blemd, which
-  imports in model units. The same scale is used when comparing imported keys
-  with existing shape keys, so duplicate/conflict detection stays correct.
+- **Convert Units** (default on) — converts BLS position deltas from J3D
+  units to Blender units. When enabled, deltas are multiplied by `0.01`,
+  matching a mesh imported with `j3d_bmd_io`'s default unit conversion; disable
+  it to keep original units. The same conversion is used when comparing imported 
+  keys with existing shape keys, so duplicate/conflict detection stays correct.
 - **Include keys without changes** — automatically selects keys that do not
   change the geometry. By default such keys are not imported.
 - Imported keys whose names match existing shape keys on the target mesh are
@@ -108,6 +108,9 @@ Blender-style numbering is used, for example
 - The last key of each cluster is treated as the base. The geometry of the
   other keys is recalculated as the difference from the base key, with the
   signs already applied.
+- Deltas are rotated from J3D's Y-up space to Blender's Z-up space and
+  multiplied by the **Convert Units** factor before being added to the target
+  mesh.
 - Blender shape keys store absolute coordinates, so the BLS deltas are added
   to the base mesh coordinates. This lets the import work on a mesh with an
   already modified base pose, independently of the object transformation.
