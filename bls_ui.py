@@ -40,9 +40,10 @@ from bpy.types import (
     UIList,
 )
 from bpy.app.handlers import persistent
-from bpy_extras.io_utils import ImportHelper
+from bpy_extras.io_utils import ImportHelper, ExportHelper
 
 from . import bls_importer, bls_session
+from . import bls_exporter
 
 
 # ---------------------------------------------------------------------------
@@ -107,12 +108,76 @@ def _get_settings(context=None):
     return getattr(scene, 'bls_settings', None)
 
 
+def _get_export_settings(context=None):
+    context = context or bpy.context
+    scene = getattr(context, 'scene', None)
+    return getattr(scene, 'bls_export_settings', None)
+
+
 CONVERTED_DELTA_SCALE = 0.01
 
 
 def _delta_scale(settings):
     """Return the BLS delta scale selected by the Convert Units checkbox."""
     return CONVERTED_DELTA_SCALE if settings.convert_units else 1.0
+
+
+def _populate_export_keys(settings, target=None):
+    """Fill the export key list from the target mesh's shape keys."""
+    if settings is None:
+        return
+
+    settings.keys.clear()
+    target = target if target is not None else settings.target
+
+    if target is None or target.type != 'MESH' or target.data is None:
+        return
+
+    shape_keys = target.data.shape_keys
+
+    if shape_keys is None:
+        return
+
+    for block in shape_keys.key_blocks[1:]:
+        item = settings.keys.add()
+        item.name = block.name
+        item.include = True
+
+
+def _default_base_name(target):
+    """Default base key name: the target mesh's basis key, if present."""
+    if target is None or target.data is None:
+        return ''
+
+    shape_keys = target.data.shape_keys
+
+    if shape_keys is not None and len(shape_keys.key_blocks):
+        return shape_keys.key_blocks[0].name
+
+    name = target.data.name or target.name
+    return f'{name}__base'
+
+
+def _session_base_key_name(session):
+    """Return the base-key name from the first usable BLS file in the session."""
+    if session is None:
+        return None
+
+    for file_entry in session.files:
+        for key_entry in file_entry.keys:
+            if key_entry.record.is_base:
+                return key_entry.name
+
+    return None
+
+
+def _export_target_changed(self, context):
+    """Repopulate the export list when the target mesh changes."""
+    settings = _get_export_settings(context)
+    _populate_export_keys(settings, self.target)
+
+    if settings is not None:
+        settings.base_name = _default_base_name(self.target)
 
 
 def _refresh_file_includes(settings):
@@ -509,7 +574,7 @@ class BLS_Settings(PropertyGroup):
 
     convert_units: BoolProperty(
         name='Convert Units',
-        description='Scale shape key deltas from J3D units to Blender units (if using j3d_bmd_io). '
+        description='Convert shape key positions from J3D units to Blender units (if using j3d_bmd_io). '
                     'Disable if using Blemd',
         default=True,
         update=_convert_units_changed,
@@ -519,9 +584,42 @@ class BLS_Settings(PropertyGroup):
         name='Include keys without changes',
         description='Automatically select keys that do not change the '
                     'geometry',
-        default=False,
+        default=True,
         update=_include_no_change_changed,
     )
+
+
+class BLS_ExportKeyItem(PropertyGroup):
+    name: StringProperty()
+    include: BoolProperty(
+        name='Export key',
+        description='Include this shape key in the BLS file',
+        default=True,
+    )
+
+
+class BLS_ExportSettings(PropertyGroup):
+    target: PointerProperty(
+        name='Target Mesh',
+        description='Mesh whose shape keys will be exported',
+        type=bpy.types.Object,
+        poll=_poll_mesh,
+        update=_export_target_changed,
+    )
+    filepath: StringProperty(subtype='FILE_PATH')
+    convert_units: BoolProperty(
+        name='Convert Units',
+        description='Convert shape key positions to J3D units (if using j3d_bmd_io). '
+                    'Disable if using Blemd',
+        default=True,
+    )
+    base_name: StringProperty(
+        name='Base Key Name',
+        description='Name of the trailing base key in the exported BLS',
+        default='',
+        maxlen=63,
+    )
+    keys: CollectionProperty(type=BLS_ExportKeyItem)
 
 
 # ---------------------------------------------------------------------------
@@ -873,6 +971,193 @@ class BLS_OT_import_folder(Operator):
 
 
 # ---------------------------------------------------------------------------
+# Export
+# ---------------------------------------------------------------------------
+
+def _open_export_settings():
+    """Timer callback: open the export settings dialog after the file browser."""
+    try:
+        bpy.ops.bls_shape_keys.export_settings('INVOKE_DEFAULT')
+    except Exception as exc:  # pragma: no cover - only in unusual UI states
+        print(f'BLS exporter: could not open settings dialog: {exc}')
+
+    return None
+
+
+def _export_mesh_target(context):
+    """Return the active mesh, or the first selected mesh."""
+    target = context.active_object
+
+    if target is None or target.type != 'MESH':
+        target = next(
+            (obj for obj in context.selected_objects if obj.type == 'MESH'),
+            None,
+        )
+
+    return target if target is not None and target.type == 'MESH' else None
+
+
+class BLS_OT_export_files(Operator, ExportHelper):
+    bl_idname = 'bls_shape_keys.export_files'
+    bl_label = 'Export BLS'
+    bl_description = 'Export Blender shape keys to a J3D .bls file'
+    bl_options = {'REGISTER'}
+
+    filename_ext = '.bls'
+    filter_glob: StringProperty(default='*.bls', options={'HIDDEN'})
+
+    def invoke(self, context, _event):
+        target = _export_mesh_target(context)
+
+        if target is not None:
+            name = target.name or (target.data.name if target.data else '')
+            if name:
+                self.filepath = bpy.path.ensure_ext(name, self.filename_ext)
+
+        return ExportHelper.invoke(self, context, _event)
+
+    def execute(self, context):
+        target = _export_mesh_target(context)
+
+        if target is None:
+            self.report({'ERROR'}, 'Select a mesh with shape keys')
+            return {'CANCELLED'}
+
+        settings = _get_export_settings(context)
+
+        if settings is None:
+            self.report({'ERROR'}, 'Export settings are unavailable')
+            return {'CANCELLED'}
+
+        settings.filepath = self.filepath
+        settings.target = target
+        _populate_export_keys(settings, target)
+
+        if not settings.base_name.strip():
+            settings.base_name = _default_base_name(target)
+
+        if not settings.keys:
+            self.report({'ERROR'}, 'The selected mesh has no shape keys to export')
+            return {'CANCELLED'}
+
+        bpy.app.timers.register(_open_export_settings, first_interval=0.05)
+        return {'FINISHED'}
+
+
+class BLS_OT_export_settings(Operator):
+    bl_idname = 'bls_shape_keys.export_settings'
+    bl_label = 'Export J3D Shape Keys'
+    bl_description = 'Choose which shape keys to write to the BLS file'
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def invoke(self, context, _event):
+        settings = _get_export_settings(context)
+
+        if settings is None or not settings.filepath:
+            self.report({'ERROR'}, 'Select an export file first')
+            return {'CANCELLED'}
+
+        if settings.target is None:
+            self.report({'ERROR'}, 'Select a target mesh')
+            return {'CANCELLED'}
+
+        if not settings.keys:
+            _populate_export_keys(settings, settings.target)
+
+        if not settings.base_name.strip():
+            settings.base_name = _default_base_name(settings.target)
+
+        if not settings.keys:
+            self.report({'ERROR'}, 'The selected mesh has no shape keys to export')
+            return {'CANCELLED'}
+
+        return context.window_manager.invoke_props_dialog(self, width=520)
+
+    def draw(self, context):
+        layout = self.layout
+        settings = _get_export_settings(context)
+
+        if settings is None:
+            layout.label(text='Export settings are unavailable', icon='ERROR')
+            return
+
+        box = layout.box()
+        box.label(text='Export settings', icon='PREFERENCES')
+
+        target_row = box.row()
+        target_row.alert = settings.target is None
+        target_row.prop(settings, 'target')
+
+        box.prop(settings, 'convert_units')
+
+        note = box.column(align=True)
+        note.active = False
+
+        keys_box = layout.box()
+        selected = sum(1 for item in settings.keys if item.include)
+        keys_box.label(
+            text=f'Shape keys: {selected} of {len(settings.keys)} selected',
+            icon='SHAPEKEY_DATA',
+        )
+
+        if not settings.keys:
+            keys_box.label(text='No shape keys found', icon='ERROR')
+            return
+
+        for item in settings.keys:
+            keys_box.prop(item, 'include', text=item.name)
+
+        keys_box.prop(settings, 'base_name', text='Base key name')
+
+        if selected == 0:
+            keys_box.label(text='Select at least one key to export', icon='ERROR')
+
+    def execute(self, context):
+        settings = _get_export_settings(context)
+
+        if settings is None or settings.target is None:
+            self.report({'ERROR'}, 'Select a target mesh')
+            return {'CANCELLED'}
+
+        if not settings.filepath:
+            self.report({'ERROR'}, 'Select an export file')
+            return {'CANCELLED'}
+
+        names = [item.name for item in settings.keys if item.include]
+
+        if not names:
+            self.report({'WARNING'}, 'No shape keys selected for export')
+            return {'CANCELLED'}
+
+        base_name = settings.base_name.strip()
+
+        if not base_name:
+            self.report({'ERROR'}, 'Enter a name for the base key')
+            return {'CANCELLED'}
+
+        try:
+            stats = bls_exporter.export_bls(
+                settings.target,
+                settings.filepath,
+                names,
+                convert_units=settings.convert_units,
+                base_name=base_name,
+            )
+        except Exception as exc:
+            self.report({'ERROR'}, f'Export failed: {exc}')
+            return {'CANCELLED'}
+
+        info = (
+            f'BLS export - keys: {stats["keys"]}, '
+            f'vertices: {stats["vertices"]}, '
+            f'file: {stats["bytes"]} bytes'
+        )
+        context.scene.bls_last_info = info
+        self.report({'INFO'}, info)
+        return {'FINISHED'}
+
+
+# ---------------------------------------------------------------------------
 # Settings dialog / import execution
 # ---------------------------------------------------------------------------
 
@@ -884,7 +1169,7 @@ def _wrap_label(layout, text, width=88, icon='NONE'):
 
 def _draw_target_and_options(layout, settings):
     box = layout.box()
-    box.label(text='Import settings', icon='MODIFIER')
+    box.label(text='Import settings', icon='PREFERENCES')
 
     target_row = box.row()
     target_row.alert = settings.target is None
@@ -1557,6 +1842,7 @@ class BLS_OT_settings(Operator):
                 settings.target,
                 jobs,
                 delta_scale=_delta_scale(settings),
+                base_key_name=_session_base_key_name(session),
             )
         except Exception as exc:
             self.report({'ERROR'}, f'Import failed: {exc}')
@@ -1608,6 +1894,15 @@ def _menu_import(self, context):
     )
 
 
+def _menu_export(self, context):
+    """Add the BLS exporter to ``File > Export``."""
+    layout = self.layout
+    layout.operator(
+        'bls_shape_keys.export_files',
+        text='J3D Shape Keys (.bls)',
+    )
+
+
 class BLS_PT_main(Panel):
     bl_idname = 'BLS_PT_main'
     bl_label = 'BLS'
@@ -1624,12 +1919,17 @@ class BLS_PT_main(Panel):
         column.operator(
             'bls_shape_keys.import_files',
             text='Import BLS Files',
-            icon='FILEBROWSER',
+            icon='IMPORT',
         )
         column.operator(
             'bls_shape_keys.import_folder',
             text='Import BLS Folder',
-            icon='FILE_FOLDER',
+            icon='IMPORT',
+        )
+        column.operator(
+            'bls_shape_keys.export_files',
+            text='Export BLS',
+            icon='EXPORT',
         )
 
         if _SESSION is not None:
@@ -1666,6 +1966,8 @@ _CLASSES = (
     BLS_FileItem,
     BLS_KeyItem,
     BLS_Settings,
+    BLS_ExportKeyItem,
+    BLS_ExportSettings,
     BLS_UL_files,
     BLS_UL_keys,
     BLS_OT_open_file,
@@ -1674,6 +1976,8 @@ _CLASSES = (
     BLS_OT_key_details,
     BLS_OT_import_files,
     BLS_OT_import_folder,
+    BLS_OT_export_files,
+    BLS_OT_export_settings,
     BLS_OT_settings,
     BLS_PT_main,
 )
@@ -1684,12 +1988,14 @@ def register():
         bpy.utils.register_class(cls)
 
     bpy.types.Scene.bls_settings = PointerProperty(type=BLS_Settings)
+    bpy.types.Scene.bls_export_settings = PointerProperty(type=BLS_ExportSettings)
     bpy.types.Scene.bls_last_info = StringProperty(
         name='Last BLS import',
         default='',
     )
 
     bpy.types.TOPBAR_MT_file_import.append(_menu_import)
+    bpy.types.TOPBAR_MT_file_export.append(_menu_export)
     bpy.app.handlers.load_post.append(_clear_stale_info)
 
 
@@ -1706,8 +2012,15 @@ def unregister():
     except (AttributeError, ValueError):
         pass
 
+    try:
+        bpy.types.TOPBAR_MT_file_export.remove(_menu_export)
+    except (AttributeError, ValueError):
+        pass
+
     if hasattr(bpy.types.Scene, 'bls_last_info'):
         del bpy.types.Scene.bls_last_info
+    if hasattr(bpy.types.Scene, 'bls_export_settings'):
+        del bpy.types.Scene.bls_export_settings
     if hasattr(bpy.types.Scene, 'bls_settings'):
         del bpy.types.Scene.bls_settings
 

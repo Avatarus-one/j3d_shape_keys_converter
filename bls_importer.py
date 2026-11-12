@@ -134,7 +134,7 @@ def existing_shape_key_displacements(obj):
     return result
 
 
-def apply_shape_keys(context, obj, jobs, delta_scale=0.01):
+def apply_shape_keys(context, obj, jobs, delta_scale=0.01, base_key_name=None):
     """Add shape keys to *obj*.
 
     Parameters
@@ -150,6 +150,10 @@ def apply_shape_keys(context, obj, jobs, delta_scale=0.01):
         Scale applied to BLS position deltas before they are added to the
         mesh.  Use ``0.01`` for meshes imported with ``j3d_bmd_io``'s default
         scale and ``1.0`` for Blemd.
+    base_key_name:
+        Optional name for the target mesh's basis key when the mesh has no
+        shape keys yet.  BLS imports pass the base-key name from the first
+        BLS file here.
 
     A key whose final name already exists is overwritten.  The dialog renames
     imported keys that would collide with existing shape keys, so an overwrite
@@ -188,7 +192,10 @@ def apply_shape_keys(context, obj, jobs, delta_scale=0.01):
     shape_keys = mesh.shape_keys
 
     if shape_keys is None:
-        obj.shape_key_add(name='Basis', from_mix=False)
+        obj.shape_key_add(
+            name=(base_key_name or 'Basis'),
+            from_mix=False,
+        )
         shape_keys = mesh.shape_keys
         stats['created_basis'] = True
 

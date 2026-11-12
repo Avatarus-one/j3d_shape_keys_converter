@@ -1,7 +1,7 @@
 # J3D Shape Keys Converter
 
 A Blender add-on that imports shape key data from J3D `.bls` files onto 
-a selected scene mesh.
+a selected scene mesh and exports selected Blender shape keys back to `.bls`.
 
 Supported in Blender 3.0 and newer (tested on 3.0.0, 3.6.23, 4.1.1, 4.2.0,
 and 4.5.1).
@@ -20,17 +20,21 @@ documentation. All changes were reviewed and verified in Blender 3.0, 3.6,
 
 - Import one or several selected `.bls` files at once.
 - Import a folder, including all nested subfolders.
+- Export selected Blender shape keys to a `.bls` file from `File > Export >
+  J3D Shape Keys (.bls)` or the sidebar.
+- Export includes generated base/key normals and a normal blend table.
 - A settings dialog after the file selection:
   - target mesh selection;
   - file list with key, duplicate, conflict, and incompatible counts;
   - shape key list for every file;
   - selection and renaming of the keys to import;
   - automatic J3D (Y-up) to Blender (Z-up) axis conversion.
-- Automatic comparison of identically named keys between files:
+- Export settings include a shape-key selection list and the same
+  **Convert Units** option.
+- Automatic comparison of identically named keys between imported .bls files:
   - identical deformation → the key is marked as a duplicate and skipped;
   - different deformation → the key is marked as a conflict and renamed.
-- Base keys (`*__base`, the last key of a cluster) and no-change keys
-  (matching the base) are shown for reference but are not imported by default.
+- Base keys (`*__base`, the last key of a cluster) are shown for reference.
 
 ## Installation
 
@@ -58,6 +62,28 @@ folder into the Blender add-ons directory (`scripts/addons/`).
    - edit the names in the text fields if needed;
    - press `OK`.
 
+## Export
+
+1. Select the mesh that contains the shape keys you want to export.
+2. Open `File > Export > J3D Shape Keys (.bls)`.
+3. In the export dialog:
+   - check the target mesh;
+   - select the shape keys to export;
+   - edit the **Base Key Name** at the end of the key list (it defaults to
+     the target mesh's basis key name;
+   - leave **Convert Units** enabled for meshes imported with `j3d_bmd_io`
+     (positions are multiplied by `100` to write J3D model units), or disable
+     it for Blemd/model-unit meshes;
+   - press `OK`.
+
+The exporter writes one BLS cluster containing the selected keys and a trailing
+base key. Keys are stored in the selected order. Vertex normals are generated
+for the base key and every selected key, and the cluster contains the position
+map, normal slots, per-key normal arrays, and the normal blend table used by
+the runtime deformer. One normal slot is used per vertex (no normal-slot
+grouping). The export is self-contained and does not rely on metadata added by
+other add-ons, so it also works for meshes created from scratch.
+
 ## Key statuses
 
 | Status | Meaning |
@@ -66,7 +92,7 @@ folder into the Blender add-ons directory (`scripts/addons/`).
 | `Duplicate` | The deformation fully matches a key from another file. Not imported. |
 | `Conflict` | The name matches but the deformation differs. The key is renamed and imported. |
 | `Base` | The last key of a cluster, used as the base for deltas. Not imported. |
-| `No change` | All deltas are zero; the key does not change the geometry. Not imported by default. |
+| `No change` | All deltas are zero; the key does not change the geometry. Imported by default. |
 | `Incompatible` | The key references vertices outside the target mesh. Not imported. |
 
 If the target mesh already has a key with the same name, the comparison uses
@@ -88,7 +114,7 @@ Blender-style numbering is used, for example
   it to keep original units. The same conversion is used when comparing imported 
   keys with existing shape keys, so duplicate/conflict detection stays correct.
 - **Include keys without changes** — automatically selects keys that do not
-  change the geometry. By default such keys are not imported.
+  change the geometry.
 - Imported keys whose names match existing shape keys on the target mesh are
   renamed automatically. If the user manually restores the original name,
   the existing key is overwritten. `Basis` is never overwritten.
@@ -123,6 +149,12 @@ Blender-style numbering is used, for example
   are not imported.
 - BLS normals do not participate in shape key creation: Blender stores only
   vertex coordinates, and normals are recalculated from the geometry.
+- BLS export does not group vertices by shared normals. Every mesh vertex gets
+  its own normal slot, so exported files may contain more normal slots than the
+  original BLS.
+- Split-normal export is not supported. Each vertex writes to a single normal
+  destination; the exporter does not reproduce the multiple BMD normal indices
+  that original BLS files use for split normals.
 - Duplicates and conflicts are determined by the actual vertex displacement:
   only non-zero position deltas are summed, and each vertex is compared with a
   tolerance of 0.001. Normals, zero slots, and a different number of slots do

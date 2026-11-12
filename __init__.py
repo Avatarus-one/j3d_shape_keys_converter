@@ -2,7 +2,8 @@
 J3D Shape Keys Converter
 ========================
 
-Imports shape keys from J3D ``.bls`` files onto a selected mesh.
+Imports shape keys from J3D ``.bls`` files onto a selected mesh and exports
+selected Blender shape keys back to ``.bls``.
 
 Select one or several BLS files, or a folder (including subfolders),
 review the parsed keys, exclude or rename them, and apply the result
@@ -18,10 +19,10 @@ for implementation, testing, and documentation.
 bl_info = {
     'name': 'J3D Shape Keys Converter',
     'author': 'Avatarus',
-    'version': (1, 0, 0),
+    'version': (1, 1, 0),
     'blender': (3, 0, 0),
-    'location': 'File > Import, 3D View > Sidebar > J3D Shape Keys',
-    'description': 'Import J3D .bls shape keys',
+    'location': 'File > Import/Export, 3D View > Sidebar > J3D Shape Keys',
+    'description': 'Import and export J3D .bls shape keys',
     'category': 'Import-Export',
 }
 
